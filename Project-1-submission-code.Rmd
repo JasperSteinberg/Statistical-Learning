@@ -1,0 +1,652 @@
+---
+subtitle: "TMA4268 Statistical Learning V2024"
+title: "Compulsory exercise 1: Group 49"
+author: "Jasper Steinberg, Maximilian Rønseth"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  # html_document
+  pdf_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE,tidy=TRUE,message=FALSE,warning=FALSE,strip.white=TRUE,prompt=FALSE,
+                      cache=TRUE, size="scriptsize",fig.width=4, fig.height=3,fig.align = "center")
+
+```
+
+```{r,eval=TRUE,echo=FALSE}
+#install.packages("knitr") # probably already installed
+#install.packages("rmarkdown") # probably already installed
+#install.packages("ggplot2") # plotting with ggplot2
+#install.packages("dplyr") # for data cleaning and preparation
+#install.packages("ggfortify") # for model checking
+#install.packages("MASS")
+#install.packages("tidyr")
+#install.packages("carData") # dataset
+#install.packages("class")
+#install.packages("pROC")
+#install.packages("plotROC")
+#install.packages("boot")
+#install.packages("ggmosaic")
+library("knitr")
+library("rmarkdown")
+library("ggplot2")
+library("dplyr")
+library("ggfortify")
+library("boot")
+```
+
+<!--  Etc (load all packages needed). -->
+
+# Problem 1
+
+## a)
+
+Examples of qualitative variables are eye colour (green, blue, brown),
+coffee roast (dark, medium, light) and sex (male, female).
+
+Examples of quantitative variables are height (0-300cm), light (in
+lumen) and speed (in m/s).
+
+## b)
+
+KNN can be used, since it is simply a method on categorizing data based
+on the category of its neighbors. Linear regression can not be used as
+it produces probabilities outside of $[0,1]$. Logistic regression can be
+used as it is always bounded between $[0,1]$. LDA can be used, since it
+is fundamentaly about prediction given the data conditioned on the
+response. Since QDA only differs from LDA in assumptions, it is also
+applicable.
+
+## c)
+
+### i)
+
+The term $E[f(X) - \hat{f}(X)]^2$ corresponds to the bias of the model,
+i.e. the error between the real data and the model. The model variance
+is given by the term $\text{Var}(\hat{f}(X))$, i.e. how much the model
+varies when we change the data. The last term $\text{Var}(\epsilon)$
+represents the irreducible error, omnipresent in all of science.
+
+### ii)
+
+The bias-variance trade-off is that since the LHS is a fixed number and
+the variance of the irreducible error always exists, changing the bias
+will lead to change in the variance and vice versa (to maintain equality
+in the expected mean squared error expression).
+
+### iii)
+
+Since the variance is given by $\text{Var}(x) = E(x^2) - E(x)^2$, we
+have that
+$$E[(Y - \hat{Y})^2] = \text{Var}(Y - \hat{Y}) + E[(Y-\hat{Y})]^2.$$ Now
+we insert the expressions in terms of $f$ to obtain
+$$= \text{Var}(f(X) + \epsilon - \hat{f}(X)) + E(f(X) - \hat{f}(X) + \epsilon)^2.$$
+First handling the variance term, we use that $f$ deterministic (i.e.
+has $0$ variance). Thus, by also the standard property of the
+variance,$\text{Var}(aX + Y) = a^2\text{Var}(X) + \text{Var}(Y)$, we
+have
+$$\text{Var}(f(X) + \epsilon - \hat{f}(X)) = \text{Var}(\hat{f}(X)) + \text{Var}(\epsilon).$$
+To handle the expectation term, we use that $E$ is linear and that the
+irreducible error has expectation $0$. Thus
+$$E(f(X) - \hat{f}(X) + \epsilon)^2 = E(f(X) - \hat{f}(X))^2.$$
+Combining what we found we can conclude that the original expression
+reduces to
+
+$$=\text{Var}(\hat{f}(X)) + \text{Var}(\epsilon) + E(f(X) - \hat{f}(X))^2,$$
+which proves the result.
+
+## d)
+
+We see that for $K=1$ the nearest neighbor is blue, thus the KNN
+classification of the black dot would be blue. For $K=3$ the nearest
+neighbors are blue, red, red, thus the black dot is classified as red.
+For $K=5$ we count 2 blue and 3 red dots, thus the classification yields
+red.
+
+## e)
+
+### i)
+
+```{r,echo=TRUE,eval=TRUE}
+
+library(MASS) 
+#data(Boston)
+
+lm1 <- lm(medv ~ rm + age, data = Boston)
+
+summary(lm1)
+```
+
+### ii)
+
+```{r,echo=TRUE,eval=TRUE}
+indexLM <- c(6, 7, 14) 
+
+reducedBoston <- Boston[, indexLM]
+
+cor_matrix <- cor(reducedBoston) 
+
+cor_matrix
+```
+
+### iii)
+
+```{r,echo=TRUE,eval=TRUE}
+
+lm2 <- lm(medv ~ rm + age + nox, data = Boston) 
+summary(lm2)
+
+```
+
+### iv)
+
+The change could attributed to compounding effects, essentially saying
+that the age and amount of air pollution are correlated variables. Below
+we compute the correlation and see that the variables are highly
+correlated.
+
+```{r,echo=TRUE,eval=TRUE}
+cor(Boston)[5,7]
+```
+
+# Problem 2
+
+## a)
+
+### i)
+
+```{r, eval=FALSE, echo=TRUE}
+# load the boston housing price dataset
+data(Boston)
+
+
+# fit the linear regression model
+lm_model <- lm(medv ~ crim*age + rm + I(rm^2), Boston)
+
+summary(lm_model)
+
+```
+
+### ii)
+
+We first note that all terms not involving $X_{\text{crim}}$ will
+cancel, since they remain the same. Thus the expression for the change in housing prices will read
+$$\Delta Y_{\text{medv}} = \beta_1 \Delta X_{\text{crim}} + \beta_3 \Delta X_{\text{crim}}X_{\text{age}}.$$ Given that crime is reduced by $10$, we have that the change in crime will be $\Delta X_{\text{crim}} = -10$. Furthermore, we were given that $X_{\text{age}} = 60$. To conclude we only need the coefficients, which we extract from the previous task as $\beta_1 = -0.796544$ and $\beta_3 = 0.005792$. Inserting all the numbers we find
+$\Delta Y_{\text{medv}}\simeq 4.49.$
+
+## b)
+
+If we want to reduce uncertainty in the model parameters we could
+increase the sample size, since this would decrease the standard error
+of the parameter estimates.
+
+## c)
+
+### i)
+
+If we were to use $\hat{\beta}_3 = 10$ in the formula for the t-value,
+we get
+$$t = \frac{\hat{\beta}_3}{\text{SE}(\hat{\beta}_3)} = \frac{10}{0.40201} = 24.875.$$
+
+###ii)
+
+Yes, we see that the F-statistic ($=216.1$) in the summary has an
+extremely low p-value, $p < 2.2e-16$, thus we expect at least one of the
+predictors to be helpful in predicting the response.
+
+### iii)
+
+```{r,echo=TRUE,eval=TRUE}
+lm_model2 <- lm(medv ~ crim + age, data = Boston) 
+summary(lm_model2)
+```
+
+Thus, even with this reduced model, we would still find it highly
+probable that at least one of the predictors would be beneficial to
+predicting the response; this is due to the extremely low $p$-value
+associated with the F-test.
+
+## d)
+
+```{r,echo=TRUE,eval=TRUE}
+
+#We override the previous lm_model to fit the task
+lm_model <- lm(medv ~ crim + age + rm, data = Boston)
+
+```
+
+### i)
+
+```{r,echo=TRUE,eval=TRUE}
+
+new_data <- data.frame(crim = 10, age = 90, rm = 5)
+
+conf_int <- predict(lm_model, newdata = new_data, interval =
+"confidence", level = 0.99)
+
+#Lower bound 
+conf_int[1, 2]
+
+#Upper bound 
+conf_int[1, 3]
+```
+
+### ii)
+
+```{r,echo=TRUE,eval=TRUE}
+
+pred_int <- predict(lm_model, newdata = new_data, interval =
+"prediction", level = 0.99)
+
+#Lower bound 
+pred_int[1, 2]
+
+#Upper bound 
+pred_int[1, 3]
+```
+
+### iii)
+
+The confidence interval of level 99% is defined in the following way:
+given some parameter you are trying to estimate, we will in 99% of times
+find that the true value of the parameter lies in our interval.
+
+A prediction interval, is defined in the following: if you sample new
+data, then in 99% of the cases , we would expect our new value to lie
+within this interval.
+
+### iv)
+
+```{r,echo=TRUE,eval=TRUE}
+
+
+autoplot(lm_model, smooth.colour = NA)
+
+```
+
+The Tukey-Anscombe plot has a slight curvature, in addition to outlier
+points on a line, indicating that our linear modeling assumption is
+problematic. The QQ-plot shows that the normal assumption is violated,
+as it deviates sharply from the linear line towards the end.
+
+## e)
+
+### i)
+
+The problem with the model is that is is not identifiable. In other
+words we could add an arbitrary constant to $\beta_0$, and subtract it
+from $\beta_1$ and $\beta_2$ without changing the model. Thus we loose
+the ability to identify the optimal parameters.
+
+### ii)
+
+To solve the aforementioned problem we assign one of the groups as the
+reference group. The correct model would then read
+
+$$
+y = 
+\begin{cases}
+\beta_0 + \beta_1 + \epsilon  \text{  , if  } x_{male} = 1
+\\
+\beta_0 + \mathbb{\epsilon} \text{      ,          if } x_{male} = 0
+\end{cases}
+$$
+
+### iii)
+
+If we first define $\text{Bachelor} = 1$, $\text{Master} = 2$ and
+$\text{PhD} = 3$. We also set the reference variable as $Bachelor$, i.e.
+$\beta_1 = 0$. Thus the model would read $$ y =
+\begin{cases}
+\beta_0 + \epsilon  \text{,           if  } x_{1} = 1
+\\
+\beta_0 + \beta_2 + \mathbb{\epsilon} \text{,  if } x_{2} = 1
+\\
+\beta_0 + \beta_3 + \epsilon \text{,  if } x_{3} = 1
+\end{cases}
+$$
+
+## f)
+
+i)  TRUE ii) FALSE iii) TRUE iv) FALSE
+
+# Problem 3
+
+## a)
+
+### i)
+
+```{r,echo=TRUE,eval=TRUE}
+
+set.seed(123)
+
+# prepare the dataset into training and test datasets
+#install.packages("titanic")
+library(titanic)
+
+data("titanic_train")
+
+# remove some variables that are difficult to handle.
+# NB! after the removal, the datasets have the variable names of
+# [Survived, Pclass, Sex, Age, SibSp, Parch, Fare].
+vars_to_be_removed <- c("PassengerId", "Name", "Ticket", "Cabin", "Embarked")
+titanic_train <- titanic_train[, -which(names(titanic_train) %in% vars_to_be_removed)]
+
+# make Pclass a categorical variable
+titanic_train$Pclass <- as.factor(titanic_train$Pclass)
+
+# divide the dataset into training and test datasets
+train_idx <- sample(1:nrow(titanic_train), 0.8 * nrow(titanic_train))
+titanic_test <- titanic_train[-train_idx, ]
+titanic_train <- titanic_train[train_idx, ]
+
+# remove the rows with missing values
+titanic_train <- na.omit(titanic_train)
+titanic_test <- na.omit(titanic_test)
+
+# [ TODO] fit the logistic regression model
+logReg <- glm(Survived ~ ., data = titanic_train, family = binomial) 
+summary(logReg)
+
+# [ TODO] compute the accuracy on the test set
+
+# Make predictions on test set
+predicted_probs <- predict(logReg, newdata = titanic_test, type = "response")
+
+
+predicted_class <- ifelse(predicted_probs > 0.5, 1, 0)
+
+# Calculate accuracy
+accuracy <- mean(predicted_class == titanic_test$Survived)
+
+accuracy
+```
+
+### ii)
+
+```{r,echo=TRUE,eval=TRUE}
+anova(logReg, test = "Chisq")
+```
+
+We see that the p-value for Pclass is extremely low, less than machine
+epsilon. Thus Pclass seems like a very relevant predictor for survival.
+
+### iii)
+
+```{r,echo=TRUE,eval=TRUE}
+
+c_data <- data.frame(Pclass = factor(c(1, 3)), Sex = "female", Age = 40, SibSp = c(1, 1), Parch = c(0,0), Fare = c(200, 20))
+
+predict(logReg, newdata = c_data, type = "response")
+  
+```
+
+### iv)
+
+```{r,echo=TRUE,eval=TRUE}
+
+LDA_Reg <- lda(Survived ~ ., data = titanic_train) 
+LDA_Reg
+
+predicted_probs2 <- predict(LDA_Reg, newdata = titanic_test, type = "response")
+
+
+# Calculate accuracy
+mean(predicted_probs2$class == titanic_test$Survived)
+
+```
+
+### iv)
+
+```{r,echo=TRUE,eval=TRUE}
+QDA_Reg <- qda(Survived ~ ., data = titanic_train) 
+QDA_Reg
+
+predicted_probs3 <- predict(QDA_Reg, newdata = titanic_test, type = "response")
+
+
+# Calculate accuracy
+mean(predicted_probs3$class == titanic_test$Survived)
+
+```
+
+### vi)
+
+```{r,echo=TRUE,eval=TRUE}
+library(pROC)
+
+roc_logReg <- roc(titanic_test$Survived, predicted_probs)
+roc_lda <- roc(titanic_test$Survived, predicted_probs2$posterior[, "1"])
+roc_qda <- roc(titanic_test$Survived, predicted_probs3$posterior[, "1"])
+
+
+```
+
+```{r,echo=TRUE,eval=TRUE}
+plot(roc_logReg, main = "Roc plot for logReg")
+plot(roc_lda, main = "Roc plot for LDA")
+plot(roc_qda, main = "Roc plot for QDA")
+```
+
+### vii)
+
+```{r,echo=TRUE,eval=TRUE}
+auc(roc_logReg)
+auc(roc_lda)
+auc(roc_qda)
+```
+
+### viii)
+
+Based on the AUC-scores, we see that the closes to $1$, and thus the
+best was logistic regression. The worst was QDA. We note that they are
+very close numerically, thus it is hard to draw solid conclusions based
+on this test.
+
+## b)
+
+### i)
+
+In essence the methodologies differ, in the sense that the diagnostic
+paradigm we directly infer on $P(Y = i\mid X = x)$, where $i$ is some
+group classification, and $x$ is the data. The sampling paradigm instead
+does inference on the priors and reverse condition through Bayes' rule.
+
+### ii)
+
+Logistic regression, Naive Bayes classifier, LDA, and QDA belong to the
+diagnostic paradigm, while KNN belongs to the sampling paradigm.
+
+## c)
+
+### i)
+
+Using the notation in the textbook, we can find the decision boundary by
+solving $\delta_1(x) = \delta_2(x)$. In our case $\mu_1 = -2$,
+$\mu_2 = 2$ and $\sigma_1 = \sigma_2 = 1.5^2$, thus we solve $$
+x\frac{\mu_1}{\sigma_1^2} - \frac{\mu_1^2}{2\sigma_1^2} + \log(\pi_1)
+= x\frac{\mu_2}{\sigma_1^2} - \frac{\mu_2^2}{2\sigma_1^2} + \log(\pi_2)$$
+Inserting numbers and doing the calculating we find
+$-\frac{9}{16}\log\left(\frac{7}{3}\right) \simeq -0.47665$.
+
+### ii)
+
+```{r,echo=TRUE,eval=TRUE}
+set.seed(123) # Replace 123 with any number of your choice
+
+# generate data for the two normal distributions
+n_samples_class1 <- 3000
+n_samples_class2 <- 7000
+
+x1 <- rnorm(n_samples_class1, mean = -2, sd = 1.5)
+x2 <- rnorm(n_samples_class2, mean = 2, sd = 1.5)
+
+# create a data frame with the generated data
+df <- data.frame(X = c(x1, x2), class = c(rep(1, n_samples_class1), rep(2, n_samples_class2)))
+#summary(df)
+
+lda_model <- lda(class ~ X, data = df)
+
+```
+
+### iii)
+
+```{r,echo=TRUE,eval=TRUE}
+
+pred_post <- predict(lda_model, newdata = df, type = "response")
+
+p_1_x <- pred_post$posterior[, "1"]
+
+p_2_x <- pred_post$posterior[, "2"]
+
+```
+
+### iv)
+
+```{r,echo=TRUE,eval=TRUE}
+plot(df$X, p_1_x, col = "blue", xlab = "X", ylab = "Probability", main = "Posterior Probabilities")
+points(df$X, p_2_x, col = "red")
+legend("topright", legend = c("p1(X)", "p2(X)"), col = c("blue", "red"), lty = 1)
+
+```
+
+## d)
+
+i)  TRUE ii) TRUE iii) TRUE iv) TRUE
+
+# Problem 4
+
+## a)
+
+iv) 
+
+## b)
+
+### i)
+
+```{r,echo=TRUE,eval=TRUE}
+
+set.seed(123)
+
+# Import the Boston housing price dataset
+
+library(MASS)
+library(caret)
+data(Boston)
+
+# select specific variables
+selected_vars <- c("crim", "rm", "age", "medv")
+boston_selected <- Boston[, selected_vars]
+
+# manually perform the 5-fold cross-validation
+
+
+#folds <- createFolds(boston_selected$medv, k = 4)
+#Corrected: k=5
+folds <- createFolds(boston_selected$medv, k = 5)
+
+#Size of the data, to do LOOCV set k = 506
+length(boston_selected$medv)
+
+rmse_list <- list()
+for (i in 1:length(folds)) {
+  # get the training and validation sets
+  
+  #Change the minus
+  train <- boston_selected[-folds[[i]], ]
+  val <- boston_selected[folds[[i]], ]
+  
+  # fit a linear regression model
+  model <- lm(medv ~ ., data = train)
+  
+  # compute RMSE on the validation set
+  pred <- predict(model, val)
+  
+  #rmse <- sqrt(mean((pred - val$medv))) # root mean squared error (RSME)
+  #Corrected: Should be squared error
+  rmse <- sqrt(mean((pred - val$medv)^2))
+  
+  rmse <- rmse[1] # take out the value
+  
+  # store rmse in rmse_list
+  #rmse_list[[i]] <- rmse
+  #Corrected: Object is a list
+  rmse_list[i] <- rmse
+}
+
+# compute mean of rmse_list
+rmse_mean <- mean(as.numeric(rmse_list))
+
+cat("rmse_mean:", rmse_mean, "\n")
+
+```
+
+### ii)
+
+To use LOOCV instead, we change $k=5$ into $k=506$, since its the size of he data. We commented in the code above.
+
+## c)
+
+### i)
+
+```{r,echo=TRUE,eval=TRUE}
+
+# simulate data (no need to change this part)
+set.seed(123)
+n <- 1000 # population size
+dataset <- rnorm(n) # population
+
+# bootstrap
+
+#In the context of the task, we accept B=10, since the population size is quite low.
+B <- 10 # bootstrap sample size
+
+#There is no need to make a matrix in this case, we change to a vector. 
+boot <- rep(NA, B)
+
+for (i in 1:B) {
+  
+#We should sample the size of the dataset, not 1. Also bootstraping uses replacement. 
+boot[i] <- median(sample(dataset, n, replace = TRUE))
+}
+
+# compute the standard error of the median from the bootstrap samples
+#We correct grammar and give a more readable name.
+standard_error <- sd(boot)
+cat("Estimated standard error:", standard_error, "\n")
+
+```
+
+### ii)
+
+```{r,echo=TRUE,eval=TRUE}
+
+# simulate data (no need to change this part)
+set.seed(123)
+n <- 1000 # population size
+dataset <- rnorm(n) # population
+# bootstrap
+B <- 10 # bootstrap sample size
+boot <- matrix(NA, nrow = B, ncol = 1)
+for (i in 1:B) {
+  boot[i, ] <- median(sample(dataset, 1, replace = FALSE))
+}
+# compute the standard error of the median from the bootstrap samples
+standard_erorr_of_the_median_bootstrap <- sd(boot)
+cat("standard_erorr_of_the_median_bootstrap:", standard_erorr_of_the_median_bootstrap, "\n")
+
+```
+
+Without the corrections, we just find the estimated variance of the
+sampling distribution i.e. a number close to $1$. In the corrected
+version, we find the deviation of the expectation, i.e. a number close
+to $0$.
+
+## d)
+
+i)  FALSE ii) TRUE iii) FALSE iv) TRUE
