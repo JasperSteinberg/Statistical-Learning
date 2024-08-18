@@ -1,0 +1,382 @@
+---
+title: 'Compulsory Exercise 2: Wine prediction'
+author:
+- Maximilian Rønseth
+- Jasper Steinberg
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  pdf_document:
+    toc: no
+    toc_depth: '2'
+  html_document:
+    toc: no
+    toc_depth: '2'
+    df_print: paged
+  word_document:
+    toc: no
+    toc_depth: '2'
+header-includes:
+      - \usepackage{amsmath}
+      - \usepackage{float} 
+      - \usepackage{booktabs}
+urlcolor: blue
+abstract: This project aims to analyse a dataset containing information about the
+  quality of a specific type of red wine, Vinho Verde, through statistical learning methods.
+  Our dataset consists of 1599 samples and 11 covariates, related to chemical and subjective criteria.
+  Our goal is to inferand analyse which covariates are important for determining wine quality
+  and to analyse links between them. The analysis is a classification one,
+  where wine quality is interpreted categorically. The dataset comes from Kaggle
+  and originates from a 2009 study modeling wine preferences. The methods we have employed include
+  random forest classification and logistic regression. Results are evaluated based
+  on metrics such as missclassification rate, sensitivity, precision, and F1-score.
+  Our findings provide insights into the relationship between various covariates and
+  wine quality; we find that Random Forest models perform well with a misclassification
+  rate of around 10%.
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+# Feel free to change the setting as you see fit
+knitr::opts_chunk$set(echo = TRUE,
+                      tidy = FALSE,
+                      message = FALSE,
+                      warning = FALSE,
+                      strip.white = TRUE,
+                      prompt = FALSE,
+                      cache = TRUE,
+                      size = "scriptsize",
+                      fig.width = 4,
+                      fig.height = 3,
+                      fig.align = "center")
+
+```
+
+```{r, eval=TRUE, echo=FALSE}
+library("knitr")
+library("rmarkdown")
+library("ggplot2")
+library(readr)
+library(hrbrthemes)
+library(tidyverse)
+library(ggridges)
+library(ggthemes)
+library(cowplot)
+library(viridis)
+library(GGally)
+library(dplyr)
+library(ggcorrplot)
+library(randomForest)
+library(kableExtra)
+library(plot.matrix)
+```
+
+<!--  Etc (load all packages needed). -->
+
+## Introduction: Scope and purpose of your project
+
+In this analysis, we will be attempting to perform data/statistical analysis on a dataset, that contains information about the quality of a specific type of red wine; more specifically, it contains 1599 samples of a Portuguese red wine, called Vinho Verde, as well as 11 physiochemical and sensory covariates. When we write quality of the wine sample, we refer to a subjective measure of how good the wine is perceived to be. The goal of this report, will be to do inference, and to establish which covariates are essential for deciding upon a good wine, and which ones are correlated. We will do this via a classification route, i.e. a wine will be good, if it's above some certain threshold.
+
+Our dataset is extracted from Kaggle (<https://www.kaggle.com/datasets/uciml/red-wine-quality-cortez-et-al-2009/data>), and originates in a study done in 2009, attempting to model wine preferences.
+
+The scope of this analysis is two-fold, that is to classify which covariates are relevant for deciding which qualities in a wine are related to the percieved quality (where quality is interpreted categorically), as well as a prediction task, where we try to predict whether a wine is good or bad.
+
+## Pre-processing
+
+We begin by setting a seed, for easy replication.
+
+```{r, eval=TRUE, echo=TRUE}
+set.seed(1)
+```
+
+We install packages for visualisation, as well as defining our principal dataset. We also rename the covariates to not have spaces, i.e. volatile acidity becomes volatile_acidity, to avoid possible future errors in R.
+
+```{r, eval=TRUE, echo=TRUE}
+wine_data <- read_csv("C:/Users/maxim/Downloads/winequality-red.csv")
+```
+
+```{r, eval=TRUE, echo=FALSE}
+colnames(wine_data)[colnames(wine_data) == "fixed acidity"] <- "fixed_acidity"
+colnames(wine_data)[colnames(wine_data) == "volatile acidity"] <- "volatile_acidity"
+colnames(wine_data)[colnames(wine_data) == "citric acid"] <- "citric_acidity"
+colnames(wine_data)[colnames(wine_data) == "residual sugar"] <- "residual_sugar"
+colnames(wine_data)[colnames(wine_data) == "free sulfur dioxide"] <- "free_sulfur_dioxide"
+colnames(wine_data)[colnames(wine_data) == "total sulfur dioxide"] <- "total_sufur_dioxide"
+```
+
+Since we are doing classification, we decide that a wine will be considered "good" (which we denote by $1$), if its quality is greater than or equal to $7$; otherwise, it will be classified as "bad" (which we denote by $0$). We choose $7$ as our cut-off, both based on intuition (a $7/10$ wine is a "good" wine), as well as our histogram, that is shown below. We see that, with this paradigm, we have 217 good wines, and 1382 bad ones.
+
+```{r, eval=TRUE, echo=TRUE}
+wine_data$binary_quality <- ifelse(wine_data$quality >= 7, 1, 0)
+```
+
+Next, we split our data into a training set, on which our model(s) will be fitted, and a test set, on which our model(s) will be tested.
+
+```{r, eval=TRUE, echo=TRUE}
+split <- function(data) {
+  good_wine <- filter(data, wine_data$binary_quality == 1)
+  bad_wine <- filter(data, wine_data$binary_quality == 0)
+  
+  sample <- sample(c(TRUE, FALSE), nrow(good_wine), replace = TRUE, prob = c(0.7,0.3))
+  train_good_wine <- good_wine[sample, ]
+  test_good_wine <- good_wine[!sample, ]
+  
+  sample <- sample(c(TRUE, FALSE), nrow(bad_wine), replace = TRUE, prob = c(0.7,0.3))
+  train_bad_wine <- bad_wine[sample, ]
+  test_bad_wine <- bad_wine[!sample, ]
+  
+  train <- bind_rows(train_good_wine, train_bad_wine)
+  test <- bind_rows(test_good_wine, test_bad_wine)
+  
+  output <- list(train, test)
+  names(output) <- c("train", "test")
+  
+  return(output)
+}
+
+split_data <- split(wine_data)
+df.train <- split_data$train
+df.test <- split_data$test
+```
+
+## Descriptive data analysis/statistics
+
+First of all, we compute a summary of our dataset, to give us some preliminary intuition about means, medians, etc. Note, that some of these covariates are noticeably harder to interpret than others: for instance, it is relatively easy to interpret the effect pH will have on the quality of the wine, as low pH values mean more sourness in the wine; on the other hand, free sulfur dioxide is harder to interpret for general consumers. We also observe that there seems to be no need to scale our features.
+
+```{r, eval=TRUE, echo=FALSE}
+summary(wine_data)
+```
+
+We see that, the average pH of the wines, lies around $3.3$, and the alcohol percentage lies around $10%$.
+
+We also construct a histogram for the quality of the wines, to see how the values are distributed.
+
+```{r, eval=TRUE, echo=FALSE}
+# Set up colors for the histogram bars
+my_colors <- c("lightblue", "lightgreen", "papayawhip", "lightgrey", "lightpink")
+
+# Create the histogram
+hist(wine_data$quality, 
+     breaks = seq(0.5, 10.5, by = 1),
+     xlim = c(1, 10), 
+     col = my_colors, 
+     xlab = "Quality",
+     main = "Distribution of Wine Quality Ratings",
+     border = "black", 
+     axes = FALSE 
+     )
+axis(side = 1, at = 1:10, labels = TRUE, col.axis = "black", las = 1)
+axis(side = 2, col.axis = "black")
+```
+
+We see that most wines fall somewhere in the $5/6$ range. Lastly, we explicitly compute the correlation matrix.
+
+```{r, eval=TRUE, echo=FALSE}
+wine_data <- subset(wine_data, select = -quality)
+cormat <- cor(wine_data)
+ggcorrplot(cormat)
+```
+
+We see that there isn't a particularly strong relationship between quality and any other covariates, although there is a slight positive correlation between alcohol and quiality, as well as a negative correlation between volatile acidity and quality. Thus, perhaps naïvely, we see that if we increase the alcohol percentage of our wine, we would expect a somewhat noticeable increase in wine quality; moreover, with an increase of volatile acidity (a covariate we are somewhat unsure how to interept), we will decrease the quality of our wine.
+
+Lastly, we plot the densities of the two covariates with the strongest correlation (in absolute values). We see that the plots correspond well to our correlation matrix, as higher quality wines generally have a higher alcohol percentage; also, higher quality wines tend to have slightly lower levels of volatile acidity.
+
+```{r, eval=TRUE, echo=TRUE}
+wine_data$binary_quality <- as.factor(wine_data$binary_quality)
+
+tema <- theme(plot.title=element_text(size=24, hjust=.5, vjust=1, color="white"),
+        axis.title.y=element_text(size=22, vjust=2, color="white"),
+        axis.title.x=element_text(size=22, vjust=-1, color="white"),
+        axis.text.x=element_text(size=22, color="white"),
+        axis.text.y=element_text(size=22, color="white"),
+        legend.position="None")
+
+
+options(repr.plot.width=17, repr.plot.height=13)
+
+distalc <- ggplot(data = wine_data, mapping = aes(x = alcohol, y = binary_quality)) +
+                   geom_density_ridges(mapping = aes(fill = binary_quality), bandwidth=0.181,fill="papayawhip", color = "black", linewidth = 1.5, bandwidth = 1.8, alpha = .8) +
+                   theme_solarized(light=FALSE)+
+                   scale_colour_solarized('bisque')+
+                   xlab("Alcohol") + ylab("Wine quality") +
+                   ggtitle("Quality against alcohol") +
+                   tema
+
+distvol <- ggplot(data = wine_data, mapping = aes(x = volatile_acidity, y = binary_quality)) +
+                  geom_density_ridges(mapping = aes(fill = binary_quality),bandwidth=0.181, fill="ivory3", color = "grey15", linewidth = 1.5,bandwidth = 1.8,  alpha = .8) +
+                  theme_solarized(light=FALSE)+
+                  scale_colour_solarized('bisque')+
+                  xlab("Volatile acidity") + ylab("Wine quality") +
+                  ggtitle("Quality against volatile acidity") +
+                  tema
+
+
+#plot_grid(distalc, distvol, nrow = 2, ncol = 1)
+
+#for some reason this code will run just fine, so I have the plot stored as a PNG, 
+
+#but it won't knit as a pdf (but it will as HTML), so I hope you will excuse me 
+
+#pasting it in through a pdf-editor
+```
+
+
+\newpage
+\thispagestyle{empty}
+\mbox{}
+
+Again, we see that the densities support what has been written: the curve for good wines, are more skewed towards higher levels of alcohol, and oppositely for volatile acidity.
+
+
+
+## Methods
+
+To start of, we remove the quality variable from the training and test data, as we already have our binary version of it (as we are doing classification). We also create functions, that measure the missclassification rate, the precision and the sensitivity of our model. Recall that we define the missclassificaion rate of a model by $\frac{1}{n}\sum_{i=1}^{n} I(y_{i}\neq\hat{y}_{i})$, where $I(P)$ is an indicator function that takes the value $1$ if the proposition $P$ is true, and $0$ otherwise.
+
+```{r, eval=TRUE, echo=TRUE}
+missclass <- function(model, preds, testRespons) {
+  mc <- table( preds, testRespons )
+  return(1 - sum( diag(mc) ) / sum( mc ) )
+}
+
+prec <- function(model, pred, testRespons) {
+mc <- table(pred, testRespons)
+return(mc[2, 2]/(sum(mc[2, ])))
+}
+
+sens <- function(model, pred, testRespons) {
+mc <- table(pred, testRespons)
+return(mc[2, 2]/(sum(mc[, 2])))
+}
+
+df.test <- subset(df.test, select = - quality)
+df.test$binary_quality <- as.factor(df.test$binary_quality)
+df.train <- subset(df.train, select = -quality)
+df.train$binary_quality <- as.factor(df.train$binary_quality)
+```
+
+Next, we incorporate a random forest model. We define a function $RF$ to simplify the visual aspects.
+
+```{r, eval=TRUE, echo=TRUE}
+RF <- function(d, m, n) {
+  rf.mod <- randomForest(formula = binary_quality ~ ., mtry = m, data = d, importance = T,ntree = n)
+  return(rf.mod)
+}
+```
+
+Our parameters mean the following: d is our dataset; m is a parameter that chooses the amount of randomly sampled covariates, and n is the amount of trees in the model. Here we have that $p:=11$ is the amount of predictors. We choose our mtry to be $m\in \{p,\sqrt{p}\}$; we also choose $n\in \{10, 50,100\}$; this means that we have a total of $3\cdot 2 = 6$ different "scenarios". Here, notice that $\left\lfloor\sqrt{p}\right\rfloor=3$. We also try and find an optimal value for $m$, and we find, given our choice of parameters, that $\left\lfloor\sqrt{p}\right\rfloor=3$, is a solid choice. As our ultimate goal is to buy wine at the vinmonopolet, we want to avoid classifying a good wine as a bad wine, as this will be a waste of our monetary resources. Therefore, we want the classification of good wines ($1$) to be as accurate as possible.
+
+```{r, eval=TRUE, echo=TRUE}
+
+optm <- tuneRF(df.train, df.train$binary_quality, stepFactor = 1.2, improve = 0.01, trace = T, plot = F)
+p <- 11
+
+rf.mod1.sqrt <- RF(df.train, floor(sqrt(p)), 50)
+predict11 <- predict(rf.mod1.sqrt, newdata = df.test)
+error11 <- missclass(rf.mod1.sqrt, predict11, df.test$binary_quality)
+prec11 <- prec(rf.mod1.sqrt, predict11, df.test$binary_quality)
+sens11 <- sens(rf.mod1.sqrt, predict11, df.test$binary_quality)
+mu11 <- mean(predict11 == df.test$binary_quality) 
+F1_1 <- 2 * (sens11*prec11)/(sens11+prec11)
+
+
+
+rf.mod2.sqrt <- RF(df.train, floor(sqrt(p)), 100)
+predict12 <- predict(rf.mod2.sqrt, newdata = df.test)
+error12 <- missclass(rf.mod2.sqrt, predict12, df.test$binary_quality)
+prec12 <- prec(rf.mod2.sqrt, predict12, df.test$binary_quality)
+sens12 <- sens(rf.mod2.sqrt, predict12, df.test$binary_quality)
+mu12 <- mean(predict12 == df.test$binary_quality) 
+F1_2 <- 2 * (sens12*prec12)/(sens12+prec12)
+
+
+rf.mod3.sqrt <- RF(df.train, floor(sqrt(p)), 10)
+predict13 <- predict(rf.mod3.sqrt, newdata = df.test)
+error13 <- missclass(rf.mod3.sqrt, predict13, df.test$binary_quality)
+prec13 <- prec(rf.mod3.sqrt, predict13, df.test$binary_quality)
+sens13 <- sens(rf.mod3.sqrt, predict13, df.test$binary_quality)
+mu13 <- mean(predict13 == df.test$binary_quality) 
+F1_3 <- 2 * (sens13*prec13)/(sens13+prec13)
+```
+
+Next we do essentially the same but for the different value of $m$.
+
+```{r, eval=TRUE, echo=TRUE}
+rf.mod1.p <- RF(df.train, p, 50)
+predict21 <- predict(rf.mod1.p, newdata = df.test)
+error21 <- missclass(rf.mod1.p, predict21, df.test$binary_quality)
+prec21 <- prec(rf.mod1.p, predict21, df.test$binary_quality)
+sens21 <- sens(rf.mod1.p, predict21, df.test$binary_quality)
+mu21 <- mean(predict21 == df.test$binary_quality) 
+F2_1 <- 2 * (sens21*prec21)/(sens21+prec21)
+
+
+
+rf.mod2.p <- RF(df.train, p, 100)
+predict22 <- predict(rf.mod2.p, newdata = df.test)
+error22 <- missclass(rf.mod2.p, predict22, df.test$binary_quality)
+prec22 <- prec(rf.mod2.p, predict22, df.test$binary_quality)
+sens22 <- sens(rf.mod2.p, predict22, df.test$binary_quality)
+mu22 <- mean(predict22 == df.test$binary_quality) 
+F2_2 <- 2 * (sens22*prec22)/(sens22+prec22)
+
+
+rf.mod3.p <- RF(df.train, p, 10)
+predict23 <- predict(rf.mod3.p, newdata = df.test)
+error23 <- missclass(rf.mod3.p, predict23, df.test$binary_quality)
+prec23 <- prec(rf.mod3.p, predict23, df.test$binary_quality)
+sens23 <- sens(rf.mod3.p, predict23, df.test$binary_quality)
+mu23 <- mean(predict23 == df.test$binary_quality) 
+F2_3 <- 2 * (sens23*prec23)/(sens23+prec23)
+```
+
+To compare against the random forest model, we have attempted to create a logistic regression model to perform the same task. We choose the cut-off to be $p>0.5$, which is a standard choice, and seems to fit well for our data set.
+
+```{r, eval=TRUE, echo=TRUE}
+logmodel <- glm(df.train$binary_quality ~., family = "binomial", data = df.train)
+logtest <- predict(logmodel, type ="response", newdata = df.test)
+logpred <- ifelse(logtest > 0.5, 1,0)
+
+
+
+errorlog <- missclass(logmodel,logpred,df.test$binary_quality)
+senslog<- sens(logmodel,logpred,df.test$binary_quality)
+preclog<-prec(logmodel,logpred,df.test$binary_quality)
+mulog <- mean(logpred == df.test$binary_quality)
+F1_log <- 2*(senslog*preclog)/(senslog+preclog)
+
+```
+
+
+
+```{r, eval=TRUE, echo=FALSE}
+RF11 <-c("sqrt{p}",round(50,1), round(error11, 4), round(sens11, 4), round(prec11,4), round(F1_1, 4))
+RF12 <-c("sqrt{p}",round(100,1), round(error12, 4), round(sens12, 4), round(prec12,4), round(F1_2, 4))
+RF13 <-c("sqrt{p}",round(10,1), round(error13, 4), round(sens13, 4), round(prec13,4), round(F1_3, 4))
+RF21 <-c("p",round(50,1), round(error21, 4), round(sens21, 4), round(prec21,4), round(F2_1, 4))
+RF22 <-c("p",round(100,1), round(error22, 4), round(sens22, 4), round(prec22,4), round(F2_2, 4))
+RF23 <-c("p",round(10,1), round(error23, 4), round(sens23, 4), round(prec23,4), round(F2_3, 4))
+LOG <-c("N/A", "N/A", round(errorlog, 4), round(senslog, 4), round(preclog,4), round(F1_log, 4))
+table <- rbind(RF11, RF12, RF13, RF21, RF22, RF23, LOG)
+```
+
+## Results and interpretation
+
+Lastly, we plot a table to gain an overarching understanding of how well our models have performed.
+```{r, eval=TRUE, echo=TRUE}
+knitr::kable(table, "latex", booktabs = TRUE, escape = FALSE, caption = "Model evaluations for Random forest and logistic regression",
+            col.names = c(
+              "$m_{try}$",
+              "Trees",
+              "Missclassification rate",
+              "Sensitivity",
+              "Precision",
+              "$F_1$ score"))  %>%
+            kable_styling(latex_options = "HOLD_position")
+```
+
+## Summary
+
+Our results indicate that random forest models outperform logistic regression, achieving slightly lower missclassification rates and higher F1-scores across different parameter choices. This superiority may stem from the inherent robustness of random forest algorithms, which handle complex interactions between predictors more effectively than logistic regression. Additionally, random forest models are less prone to overfitting and can capture nonlinear relationships between covariates and wine quality more accurately. Interestingly, we see that we achiece the lowest missclassification rate, and the highest $F_{1}$-score when $(m_{try}, \#Trees)=(p,50)$; this combination probably achieves a balance of model complexity and overfitting, according to the bias-variance trade-off. If there is a lot of non-linearity in the data, then allowing the model to be more complex can capture this relationship better than if we had a less flexible model.
+
+Overall, our analyses suggest that random forest models are better suited for predicting wine quality in this data set, as they are more efficient at handling complex data with non linear relationships.
+
